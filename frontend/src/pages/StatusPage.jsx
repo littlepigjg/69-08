@@ -1,66 +1,14 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useApp } from '../App.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import Modal from '../components/Modal.jsx'
 import MiniAvailabilityBars from '../components/MiniAvailabilityBars.jsx'
 import { AvailabilityTrendChart, HourSelector } from '../components/Charts.jsx'
+import DraggableGrid from '../components/DraggableGrid.jsx'
+import LayoutToolbar from '../components/LayoutToolbar.jsx'
+import useDashboardLayout from '../hooks/useDashboardLayout.js'
 import { formatRelativeTime } from '../lib/utils'
-
-function ServiceCard({ service, onClick, selected }) {
-  const statusColor = {
-    up: '#10b981', down: '#ef4444', maintenance: '#f59e0b', unknown: '#9ca3af'
-  }[service.summary?.status] || '#9ca3af'
-
-  const avail = service.summary?.availability ?? 0
-  const availColor = avail >= 99 ? '#059669' : avail >= 95 ? '#d97706' : '#dc2626'
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        background: '#fff', borderRadius: 14, padding: 20,
-        border: selected ? `2px solid ${statusColor}` : '2px solid transparent',
-        boxShadow: selected ? `0 4px 20px ${statusColor}33` : '0 1px 3px rgba(0,0,0,0.06)',
-        cursor: 'pointer', transition: 'all 0.2s',
-        minWidth: 280, flex: '1 1 320px'
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-        <div>
-          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{service.name}</h3>
-          <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>
-            {service.type.toUpperCase()} · {service.target}{service.type === 'tcp' && service.port ? `:${service.port}` : ''}
-          </div>
-        </div>
-        <StatusBadge status={service.summary?.status} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-        <div style={{ background: '#f9fafb', padding: 10, borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>可用率</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: availColor }}>
-            {avail.toFixed(2)}%
-          </div>
-        </div>
-        <div style={{ background: '#f9fafb', padding: 10, borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>平均响应</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#4f46e5' }}>
-            {service.summary?.avgResponseTime || 0}ms
-          </div>
-        </div>
-      </div>
-
-      <MiniAvailabilityBars serviceId={service.id} />
-
-      {service.summary?.lastCheck && (
-        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
-          上次检测: {formatRelativeTime(service.summary.lastCheck)}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function ServiceDetailPanel({ service, onClose }) {
   const [hours, setHours] = useState(24)
@@ -141,6 +89,41 @@ export default function StatusPage() {
   const { services, lastUpdate, isConnected, connectionState } = useApp()
   const [selected, setSelected] = useState(null)
 
+  const {
+    layout,
+    isLoading,
+    fingerprint,
+    moveItem,
+    toggleCardSize,
+    togglePin,
+    applyPreset,
+    resetToDefault,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    getSortedServices,
+    isResponsiveSingleColumn,
+    currentPreset,
+    presets
+  } = useDashboardLayout(services)
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault()
+        redo()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
+
   const counts = useMemo(() => {
     let up = 0, down = 0, maint = 0, unk = 0
     for (const s of services) {
@@ -154,6 +137,7 @@ export default function StatusPage() {
   }, [services])
 
   const selectedService = selected ? services.find(s => s.id === selected) : null
+  const sortedServices = getSortedServices()
 
   const connBadge = {
     idle: { bg: '#f3f4f6', text: '#6b7280', label: '未连接' },
@@ -178,7 +162,7 @@ export default function StatusPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
             background: connBadge.bg, color: connBadge.text,
@@ -200,7 +184,21 @@ export default function StatusPage() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ marginBottom: 20 }}>
+        <LayoutToolbar
+          currentPreset={currentPreset}
+          presets={presets}
+          onApplyPreset={applyPreset}
+          onReset={resetToDefault}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          fingerprint={fingerprint}
+        />
+      </div>
+
+      <div style={{ position: 'relative' }}>
         {services.length === 0 && (
           <div style={{
             background: '#fff', borderRadius: 14, padding: 60, textAlign: 'center',
@@ -217,14 +215,42 @@ export default function StatusPage() {
             }}>添加服务</Link>
           </div>
         )}
-        {services.map(svc => (
-          <ServiceCard
-            key={svc.id}
-            service={svc}
-            selected={selected === svc.id}
-            onClick={() => setSelected(selected === svc.id ? null : svc.id)}
+
+        {!isLoading && services.length > 0 && (
+          <DraggableGrid
+            services={sortedServices}
+            onMoveItem={moveItem}
+            onToggleSize={toggleCardSize}
+            onTogglePin={togglePin}
+            selectedService={selected}
+            onSelectService={(id) => setSelected(selected === id ? null : id)}
+            isResponsiveSingleColumn={isResponsiveSingleColumn}
           />
-        ))}
+        )}
+
+        {isLoading && services.length > 0 && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 80,
+            background: '#fff',
+            borderRadius: 14
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                border: '3px solid #e5e7eb',
+                borderTopColor: '#6366f1',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto 16px'
+              }} />
+              <div style={{ color: '#6b7280', fontSize: 14 }}>加载布局配置中...</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedService && (
@@ -239,6 +265,16 @@ export default function StatusPage() {
           数据更新于 {new Date(lastUpdate).toLocaleString('zh-CN')} · 状态变化实时推送
         </div>
       )}
+
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   )
 }
